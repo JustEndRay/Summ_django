@@ -1,0 +1,402 @@
+{% extends 'base.html' %}
+{% block title %}Summarizer · Home{% endblock %}
+{% block content %}
+  <div class="form-container">
+    <div class="card">
+      <div class="card-content">
+        <span class="card-title">
+          <i class="material-icons left">summarize</i>
+          Text Summarization
+        </span>
+        
+        <form method="post" enctype="multipart/form-data" id="summarizeForm">
+          {% csrf_token %}
+          
+          <!-- Text Input with Improvements -->
+          <div class="input-field enhanced-textarea">
+            <i class="material-icons prefix">text_fields</i>
+            {{ form.text }}
+            <div class="textarea-info">
+              <div class="char-counter">0/10000</div>
+              <div class="word-counter">0 words</div>
+            </div>
+          </div>
+          
+          <div class="file-field input-field">
+            <div class="btn blue">
+              <i class="material-icons left">attach_file</i>
+              <span>File</span>
+              {{ form.file }}
+            </div>
+            <div class="file-path-wrapper">
+              <input class="file-path validate" type="text" placeholder="Upload document (txt, pdf, docx, images, tables)" />
+            </div>
+          </div>
+          
+          
+          <button class="btn waves-effect waves-light blue" type="submit" id="submitBtn">
+            <i class="material-icons left">auto_awesome</i>
+            Summarize
+          </button>
+          
+          <!-- Progress Bar -->
+          <div id="progressContainer" style="display: none; margin-top: 20px;">
+            <div class="progress-bar">
+              <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <div class="progress-text" id="progressText">Initial processing...</div>
+            <div class="progress-timer" id="progressTimer" style="font-size: 12px; color: #666; margin-top: 5px;"></div>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    {% if result %}
+    <div class="card">
+      <div class="card-content">
+        {% if result.error %}
+        <span class="card-title">
+          <i class="material-icons left">error</i>
+          Processing Error
+        </span>
+        <div class="summary-result" style="border-left-color: #ea4335;">
+          <h6><i class="material-icons left">error_outline</i>Error:</h6>
+          <p style="color: #ea4335;">{{ result.error }}</p>
+        </div>
+        {% if result.debug_info %}
+        <div class="summary-result" style="border-left-color: #fbbc04;">
+          <h6><i class="material-icons left">bug_report</i>Detailed Information:</h6>
+          <pre style="color: #9aa0a6; font-size: 12px; white-space: pre-wrap; background: #202124; padding: 12px; border-radius: 4px; border: 1px solid #5f6368;">{{ result.debug_info }}</pre>
+        </div>
+        {% endif %}
+        {% else %}
+        <span class="card-title">
+          <i class="material-icons left">description</i>
+          Summarization Result
+        </span>
+        {% if result.short_summary %}
+        <div class="summary-result">
+          <h6><i class="material-icons left">article</i>Summary:</h6>
+          <p>{{ result.short_summary|linebreaksbr }}</p>
+        </div>
+        {% endif %}
+        
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <script>
+    // Real progress tracking with Server-Sent Events
+    let progressEventSource = null;
+    let startTime = null;
+    let timerInterval = null;
+    
+    function showProgress(taskId) {
+      const progressContainer = document.getElementById('progressContainer');
+      const progressFill = document.getElementById('progressFill');
+      const progressText = document.getElementById('progressText');
+      const progressTimer = document.getElementById('progressTimer');
+      const submitBtn = document.getElementById('submitBtn');
+      
+      if (progressContainer && progressFill && progressText && progressTimer && submitBtn) {
+        progressContainer.style.display = 'block';
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<i class="material-icons left">hourglass_empty</i>Processing...';
+        
+        startTime = Date.now();
+        
+        // Start timer
+        timerInterval = setInterval(() => {
+          const elapsed = Math.floor((Date.now() - startTime) / 1000);
+          const minutes = Math.floor(elapsed / 60);
+          const seconds = elapsed % 60;
+          progressTimer.textContent = `Elapsed: ${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }, 1000);
+        
+        // Connect to progress stream
+        console.log(`Connecting to SSE stream: /progress/${taskId}/`);
+        progressEventSource = new EventSource(`/progress/${taskId}/`);
+        
+        progressEventSource.onopen = function(event) {
+          console.log('SSE connection opened');
+        };
+        
+        progressEventSource.onmessage = function(event) {
+          try {
+            console.log('SSE message received:', event.data);
+            const data = JSON.parse(event.data);
+            progressFill.style.width = data.progress + '%';
+            progressText.textContent = data.message;
+            
+            // Update timer with ETA if available
+            if (data.eta_seconds) {
+              const etaMinutes = Math.floor(data.eta_seconds / 60);
+              const etaSeconds = data.eta_seconds % 60;
+              progressTimer.textContent = `Elapsed: ${Math.floor((Date.now() - startTime) / 1000)}s | ETA: ${etaMinutes}:${etaSeconds.toString().padStart(2, '0')}`;
+            }
+            
+            // Close connection when complete
+            if (data.progress >= 100) {
+              progressEventSource.close();
+              clearInterval(timerInterval);
+              progressTimer.textContent = `Completed in ${Math.floor((Date.now() - startTime) / 1000)}s`;
+              
+              // Fetch and display result
+              console.log(`Fetching result for task: ${taskId}`);
+              fetch(`/result/${taskId}/`)
+                .then(response => {
+                  console.log('Result response status:', response.status);
+                  return response.json();
+                })
+                .then(result => {
+                  console.log('Result received:', result);
+                  if (result.error) {
+                    alert('Error: ' + result.error);
+                  } else {
+                    // Display result
+                    displayResult(result);
+                  }
+                  hideProgress();
+                  
+                  // Clear form after successful processing
+                  clearForm();
+                })
+                .catch(error => {
+                  console.error('Error fetching result:', error);
+                  hideProgress();
+                });
+            }
+          } catch (e) {
+            console.error('Error parsing progress data:', e);
+          }
+        };
+        
+        progressEventSource.onerror = function(event) {
+          console.error('Progress stream error:', event);
+          console.error('EventSource readyState:', progressEventSource.readyState);
+          progressText.textContent = 'Connection error, but processing continues...';
+        };
+      }
+    }
+    
+    function hideProgress() {
+      if (progressEventSource) {
+        progressEventSource.close();
+        progressEventSource = null;
+      }
+      if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+      }
+      
+      const progressContainer = document.getElementById('progressContainer');
+      const submitBtn = document.getElementById('submitBtn');
+      
+      if (progressContainer) {
+        progressContainer.style.display = 'none';
+      }
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<i class="material-icons left">auto_awesome</i>Summarize';
+      }
+    }
+    
+    function clearForm() {
+      // Clear text input
+      const textarea = document.querySelector('#id_text');
+      if (textarea) {
+        textarea.value = '';
+        updateCounters();
+        autoResizeTextarea();
+      }
+      
+      // Clear file input
+      const fileInput = document.querySelector('#id_file');
+      if (fileInput) {
+        fileInput.value = '';
+      }
+      
+      // Clear file path display
+      const filePathInput = document.querySelector('.file-path-wrapper input');
+      if (filePathInput) {
+        filePathInput.value = '';
+      }
+      
+      console.log('Form cleared after processing');
+    }
+    
+    function displayResult(result) {
+      // Remove existing result
+      const existingResult = document.querySelector('.result-card');
+      if (existingResult) {
+        existingResult.remove();
+      }
+      
+      // Create result card
+      const resultCard = document.createElement('div');
+      resultCard.className = 'card result-card';
+      resultCard.style.marginTop = '20px';
+      
+      let resultHtml = `
+        <div class="card-content">
+          <span class="card-title">
+            <i class="material-icons left">description</i>
+            Summarization Result
+          </span>
+      `;
+      
+      if (result.short_summary) {
+        resultHtml += `
+          <div class="summary-result">
+            <h6><i class="material-icons left">article</i>Summary:</h6>
+            <p>${result.short_summary.replace(/\n/g, '<br>')}</p>
+          </div>
+        `;
+      }
+      
+      // Extended Summary removed as requested
+      
+      if (result.facts && result.facts.length > 0) {
+        resultHtml += `
+          <div class="summary-result">
+            <h6><i class="material-icons left">lightbulb</i>Key Facts:</h6>
+            <ul>
+              ${result.facts.map(fact => `<li>${fact}</li>`).join('')}
+            </ul>
+          </div>
+        `;
+      }
+      
+      resultHtml += '</div>';
+      resultCard.innerHTML = resultHtml;
+      
+      // Insert after form container
+      const formContainer = document.querySelector('.form-container');
+      formContainer.parentNode.insertBefore(resultCard, formContainer.nextSibling);
+      
+      // Scroll to result
+      resultCard.scrollIntoView({ behavior: 'smooth' });
+    }
+    
+    // Enhanced textarea functionality
+    function updateCounters() {
+      const textarea = document.querySelector('#id_text');
+      const charCounter = document.querySelector('.char-counter');
+      const wordCounter = document.querySelector('.word-counter');
+      
+      if (textarea && charCounter && wordCounter) {
+        const text = textarea.value;
+        const charCount = text.length;
+        const wordCount = text.trim() ? text.trim().split(/\s+/).length : 0;
+        
+        // Update character counter
+        charCounter.textContent = `${charCount}/10000`;
+        if (charCount > 8000) {
+          charCounter.style.color = '#f44336';
+        } else if (charCount > 5000) {
+          charCounter.style.color = '#ff9800';
+        } else {
+          charCounter.style.color = '#9aa0a6';
+        }
+        
+        // Update word counter
+        wordCounter.textContent = `${wordCount} words`;
+        if (wordCount > 1000) {
+          wordCounter.style.color = '#f44336';
+        } else if (wordCount > 500) {
+          wordCounter.style.color = '#ff9800';
+        } else {
+          wordCounter.style.color = '#9aa0a6';
+        }
+      }
+    }
+
+    // Auto-resize textarea
+    function autoResizeTextarea() {
+      const textarea = document.querySelector('#id_text');
+      if (textarea) {
+        textarea.style.height = 'auto';
+        const maxHeight = 400; // Increased max height for better text editing
+        const newHeight = Math.min(textarea.scrollHeight, maxHeight);
+        textarea.style.height = newHeight + 'px';
+        
+        // Show scrollbar if content exceeds max height
+        if (textarea.scrollHeight > maxHeight) {
+          textarea.style.overflowY = 'auto';
+        } else {
+          textarea.style.overflowY = 'hidden';
+        }
+      }
+    }
+
+
+    // Initialize on page load
+    document.addEventListener('DOMContentLoaded', function() {
+      const textarea = document.querySelector('#id_text');
+      if (textarea) {
+        // Event listeners
+        textarea.addEventListener('input', function() {
+          autoResizeTextarea();
+          updateCounters();
+        });
+        
+        textarea.addEventListener('paste', function() {
+          setTimeout(() => {
+            autoResizeTextarea();
+            updateCounters();
+          }, 10);
+        });
+        
+        // Initial setup
+        autoResizeTextarea();
+        updateCounters();
+      }
+      
+    });
+
+    // Form submission with real progress tracking
+    document.getElementById('summarizeForm').addEventListener('submit', function(e) {
+      e.preventDefault();
+      
+      const form = this;
+      const formData = new FormData(form);
+      
+      // Generate task ID for progress tracking
+      const taskId = 'task_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+      
+      // Show progress immediately
+      showProgress(taskId);
+      
+      // Start async summarization
+      fetch(`/summarize/${taskId}/`, {
+        method: 'POST',
+        body: formData,
+        headers: {
+          'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        }
+      })
+      .then(response => {
+        if (response.ok) {
+          return response.json();
+        }
+        throw new Error('Network response was not ok');
+      })
+      .then(data => {
+        if (data.error) {
+          throw new Error(data.error);
+        }
+        // Progress tracking is now handled by EventSource
+        console.log('Summarization started with task ID:', taskId);
+      })
+      .catch(error => {
+        console.error('Error:', error);
+        hideProgress();
+        alert('An error occurred during summarization. Please try again.');
+      });
+    });
+  </script>
+{% endblock %}
+
+

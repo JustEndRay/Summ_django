@@ -1,0 +1,63 @@
+{% extends 'base.html' %}
+{% block title %}Registration{% endblock %}
+{% block content %}
+  <div class="row">
+    <div class="col s12 m8 l6 offset-m2 offset-l3">
+      <div class="card">
+        <div class="card-content">
+          <span class="card-title">Registration</span>
+          <form method="post" novalidate>
+            {% csrf_token %}
+            <div class="input-field">
+              <i class="material-icons prefix">person</i>
+              {{ form.username }}
+              {% if form.username.help_text %}<small class="grey-text">{{ form.username.help_text }}</small>{% endif %}
+              {% for error in form.username.errors %}
+                <div class="red-text" style="margin-top:4px;">{{ error }}</div>
+              {% endfor %}
+            </div>
+            
+            <div class="input-field">
+              <i class="material-icons prefix">email</i>
+              {{ form.email }}
+              {% if form.email.help_text %}<small class="grey-text">{{ form.email.help_text }}</small>{% endif %}
+              {% for error in form.email.errors %}
+                <div class="red-text" style="margin-top:4px;">{{ error }}</div>
+              {% endfor %}
+            </div>
+            
+            <div class="input-field">
+              <i class="material-icons prefix">lock</i>
+              {{ form.password1 }}
+              {% if form.password1.help_text %}<small class="grey-text">{{ form.password1.help_text }}</small>{% endif %}
+              {% for error in form.password1.errors %}
+                <div class="red-text" style="margin-top:4px;">{{ error }}</div>
+              {% endfor %}
+            </div>
+            
+            <div class="input-field">
+              <i class="material-icons prefix">lock_outline</i>
+              {{ form.password2 }}
+              {% if form.password2.help_text %}<small class="grey-text">{{ form.password2.help_text }}</small>{% endif %}
+              {% for error in form.password2.errors %}
+                <div class="red-text" style="margin-top:4px;">{{ error }}</div>
+              {% endfor %}
+            </div>
+            
+            {% if form.non_field_errors %}
+              {% for e in form.non_field_errors %}
+                <div class="red-text" style="margin-bottom:8px;">{{ e }}</div>
+              {% endfor %}
+            {% endif %}
+            <button class="btn waves-effect waves-light blue" type="submit">
+              <i class="material-icons left">person_add</i>
+              Register
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+
+

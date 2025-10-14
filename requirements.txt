@@ -1,0 +1,30 @@
+# Фіксовані версії для сумісності
+# GPU build of PyTorch (CUDA 12.1). The find-links entry ensures CUDA wheels are preferred.
+-f https://download.pytorch.org/whl/cu121
+numpy>=1.21.0,<2.0.0
+torch==2.1.2
+torchvision==0.16.2
+torchaudio==2.1.2
+transformers>=4.30.0,<4.40.0
+pytorch-lightning>=2.2.0,<3.0.0  
+pymupdf>=1.23.0
+python-docx>=1.0.0
+pandas>=1.5.0,<2.0.0
+pillow>=10.0.0
+pytesseract>=0.3.10
+reportlab>=4.0.0
+sentencepiece>=0.1.99
+tabula-py>=2.9.0  # requires Java runtime; install via pip if conda fails
+pdf2image>=1.17.0  # optional alternative for pdf images OCR
+spacy>=3.7.0  # for NER and better text processing
+scikit-learn>=1.1.0,<1.4.0  # for text processing utilities
+nltk>=3.8  # for additional NLP tools
+pyarrow>=10.0.0,<15.0.0  # fix for NumPy compatibility
+
+# Web stack
+Django>=4.2,<5.0
+psycopg2-binary>=2.9.9
+python-dotenv>=1.0.1
+langdetect>=1.0.9
+
+

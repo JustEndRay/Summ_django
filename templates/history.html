@@ -1,0 +1,163 @@
+{% extends 'base.html' %}
+{% block title %}History{% endblock %}
+{% block content %}
+  <div class="card">
+    <div class="card-content">
+      <span class="card-title">
+        <i class="material-icons left">history</i>
+        History
+      </span>
+      
+      {% if records %}
+        <div class="history-container">
+          {% for r in records %}
+            <div class="history-item">
+              <div class="history-header">
+                <div class="history-date">
+                  <i class="material-icons">schedule</i>
+                  {{ r.created_at|date:"M d, Y H:i" }}
+                </div>
+                <div class="history-type">
+                  <i class="material-icons">{% if r.input_type == 'file' %}attach_file{% else %}text_fields{% endif %}</i>
+                  {{ r.input_type|title }}
+                </div>
+              </div>
+              
+              <div class="history-content">
+                <div class="history-input">
+                  <h6><i class="material-icons left">input</i>Input:</h6>
+                  <p class="history-preview">{{ r.input_preview }}</p>
+                </div>
+                
+                <div class="history-summary">
+                  <h6><i class="material-icons left">summarize</i>Summary:</h6>
+                  <p class="history-text">{{ r.short_summary }}</p>
+                </div>
+                
+                {% if r.extended_summary %}
+                  <div class="history-extended">
+                    <h6><i class="material-icons left">description</i>Extended Summary:</h6>
+                    <p class="history-text">{{ r.extended_summary }}</p>
+                  </div>
+                {% endif %}
+                
+                {% if r.facts %}
+                  <div class="history-facts">
+                    <h6><i class="material-icons left">lightbulb</i>Key Facts:</h6>
+                    <div class="facts-content">{{ r.facts|linebreaksbr }}</div>
+                  </div>
+                {% endif %}
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="empty-state">
+          <i class="material-icons large">history</i>
+          <h5>No history yet</h5>
+          <p>Your summarization history will appear here.</p>
+          <a href="/" class="btn blue">
+            <i class="material-icons left">summarize</i>
+            Start Summarizing
+          </a>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <style>
+    .history-container {
+      margin-top: 20px;
+    }
+    
+    .history-item {
+      background: #2d2d30;
+      border: 1px solid #5f6368;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+      transition: all 0.2s ease;
+    }
+    
+    .history-item:hover {
+      border-color: #1a73e8;
+      box-shadow: 0 2px 8px rgba(26, 115, 232, 0.1);
+    }
+    
+    .history-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid #5f6368;
+    }
+    
+    .history-date, .history-type {
+      display: flex;
+      align-items: center;
+      color: #9aa0a6;
+      font-size: 14px;
+    }
+    
+    .history-date i, .history-type i {
+      margin-right: 8px;
+      font-size: 18px;
+    }
+    
+    .history-content h6 {
+      color: #e8eaed;
+      font-weight: 500;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+    }
+    
+    .history-content h6 i {
+      margin-right: 8px;
+      color: #1a73e8;
+    }
+    
+    .history-preview, .history-text {
+      color: #e8eaed;
+      line-height: 1.6;
+      margin-bottom: 16px;
+      background: #202124;
+      padding: 12px;
+      border-radius: 4px;
+      border-left: 3px solid #1a73e8;
+    }
+    
+    .facts-content {
+      color: #e8eaed;
+      line-height: 1.6;
+      background: #202124;
+      padding: 12px;
+      border-radius: 4px;
+      border-left: 3px solid #34a853;
+    }
+    
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: #9aa0a6;
+    }
+    
+    .empty-state i {
+      font-size: 64px;
+      margin-bottom: 20px;
+      color: #5f6368;
+    }
+    
+    .empty-state h5 {
+      color: #e8eaed;
+      margin-bottom: 12px;
+    }
+    
+    .empty-state p {
+      margin-bottom: 24px;
+    }
+  </style>
+{% endblock %}
+
+

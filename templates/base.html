@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <title>{% block title %}Summarizer{% endblock %}</title>
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+  <!-- Materialize CSS -->
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css" rel="stylesheet" />
+  <link href="{% load static %}{% static 'css/app.css' %}?v={{ timestamp }}" rel="stylesheet" />
+  <style>
+    /* Navigation bar styling */
+    nav {
+      background: #202124 !important;
+      border-bottom: 1px solid #5f6368;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+    
+    .nav-wrapper {
+      padding: 0 24px;
+    }
+    
+    .brand-logo {
+      font-size: 1.5rem !important;
+      font-weight: 500;
+      color: #e8eaed !important;
+    }
+    
+    nav ul li a {
+      color: #e8eaed !important;
+      font-weight: 400;
+    }
+    
+    nav ul li a:hover {
+      background-color: #303134;
+      border-radius: 8px;
+    }
+    
+    /* Language selector */
+    select.browser-default {
+      background: #303134 !important;
+      border: 1px solid #5f6368 !important;
+      color: #e8eaed !important;
+      border-radius: 8px !important;
+      padding: 8px 12px !important;
+      font-size: 14px;
+      height: 36px !important;
+      margin-top: 14px !important;
+      margin-right: 16px !important;
+    }
+    
+    select.browser-default option {
+      background: #303134;
+      color: #e8eaed;
+      padding: 8px;
+    }
+    
+    /* Navigation spacing */
+    nav ul li {
+      margin-left: 8px;
+    }
+    
+    nav ul li a {
+      padding: 8px 12px !important;
+      border-radius: 8px;
+      display: flex !important;
+      align-items: center;
+      height: 36px;
+    }
+    
+    nav ul li a i {
+      margin-right: 6px !important;
+      font-size: 18px !important;
+    }
+    
+    /* Override Materialize default styles */
+    .card {
+      background: #303134 !important;
+      color: #e8eaed !important;
+    }
+    
+    .card-content {
+      color: #e8eaed !important;
+    }
+    
+    /* File input styling */
+    .file-field .btn {
+      background: #1a73e8 !important;
+    }
+    
+    .file-path-wrapper input {
+      background: #303134 !important;
+      border: 1px solid #5f6368 !important;
+      color: #e8eaed !important;
+    }
+  </style>
+</head>
+<body>
+  <nav>
+    <div class="nav-wrapper">
+      <a href="/" class="brand-logo brand">
+        <i class="material-icons left">summarize</i>
+        Summ
+      </a>
+      <ul id="nav-mobile" class="right hide-on-med-and-down">
+        {% if user.is_authenticated %}
+          <li><a href="/history/"><i class="material-icons left">history</i>History</a></li>
+          <li><a href="/logout/"><i class="material-icons left">logout</i>Logout</a></li>
+        {% else %}
+          <li><a href="/login/"><i class="material-icons left">login</i>Login</a></li>
+          <li><a href="/register/"><i class="material-icons left">person_add</i>Register</a></li>
+        {% endif %}
+      </ul>
+    </div>
+  </nav>
+
+  <div class="sidebar">
+    <div style="margin-bottom: 32px;">
+      <h5 style="color: #e8eaed; font-weight: 600; margin: 0 0 20px 0; font-size: 18px; text-align: center;">Summarizer</h5>
+    </div>
+    
+    <ul>
+      <li><a href="/" class="{% if request.resolver_match.url_name == 'home' %}active{% endif %}">
+        <i class="material-icons">summarize</i>
+        Summarization
+      </a></li>
+      
+      {% if user.is_authenticated %}
+        <li><a href="/history/" class="{% if request.resolver_match.url_name == 'history' %}active{% endif %}">
+          <i class="material-icons">history</i>
+          History
+        </a></li>
+      {% else %}
+        <li><a href="/login/">
+          <i class="material-icons">login</i>
+          Login
+        </a></li>
+        <li><a href="/register/">
+          <i class="material-icons">person_add</i>
+          Register
+        </a></li>
+      {% endif %}
+    </ul>
+    
+    <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #5f6368;">
+      <div style="color: #9aa0a6; font-size: 14px; margin-bottom: 12px; font-weight: 500;">Status</div>
+      <div style="color: #e8eaed; font-size: 16px; display: flex; align-items: center;">
+        <i class="material-icons" style="font-size: 18px; margin-right: 12px; color: #34a853;">cloud_done</i>
+        Ready to work
+      </div>
+    </div>
+  </div>
+
+  <main class="content">
+    {% block content %}{% endblock %}
+  </main>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
+  <script>
+    // Force reload CSS on page load for development
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      const links = document.querySelectorAll('link[rel="stylesheet"]');
+      links.forEach(link => {
+        if (link.href.includes('app.css')) {
+          const url = new URL(link.href);
+          url.searchParams.set('v', Date.now());
+          link.href = url.toString();
+        }
+      });
+    }
+  </script>
+</body>
+</html>
+
+
