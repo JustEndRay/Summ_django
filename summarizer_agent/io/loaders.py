@@ -2,8 +2,28 @@ from __future__ import annotations
 
 # Завантажувачі різних типів файлів для отримання текстового контенту
 import io
+import platform
 from pathlib import Path
 from typing import Tuple, List
+
+# Налаштування шляху Tesseract для Windows
+if platform.system() == 'Windows':
+    try:
+        import pytesseract
+        # Спробувати звичайні шляхи встановлення Tesseract
+        possible_paths = [
+            r'C:\Program Files\Tesseract-OCR\tesseract.exe',
+            r'C:\Program Files (x86)\Tesseract-OCR\tesseract.exe',
+        ]
+        for path in possible_paths:
+            if Path(path).exists():
+                pytesseract.pytesseract.tesseract_cmd = path
+                print(f"[INFO] Tesseract found at: {path}", flush=True)
+                break
+        else:
+            print("[WARNING] Tesseract OCR not found in standard Windows paths. OCR may not work.", flush=True)
+    except ImportError:
+        print("[WARNING] pytesseract not available. OCR will not work.", flush=True)
 
 
 def _load_txt(path: Path) -> str:
@@ -166,7 +186,14 @@ def _load_table(path: Path) -> str:
 
     if path.suffix.lower() == ".csv":
         df = pd.read_csv(path)
+    elif path.suffix.lower() in {".xlsx", ".xlsm"}:
+        # Явно вказуємо engine для Excel файлів
+        df = pd.read_excel(path, engine='openpyxl')
+    elif path.suffix.lower() == ".xls":
+        # Для старих Excel файлів
+        df = pd.read_excel(path, engine='xlrd')
     else:
+        # Fallback для інших форматів
         df = pd.read_excel(path)
     # Convert a sample/preview into text context
     preview = df.head(50)
@@ -182,7 +209,65 @@ def _load_image_ocr(path: Path) -> str:
         raise RuntimeError("pytesseract and pillow are required for OCR. Install tesseract-ocr separately.") from exc
 
     image = Image.open(path)
-    return pytesseract.image_to_string(image)
+    
+    # Configure OCR for better Ukrainian text recognition
+    try:
+        # Try Ukrainian language first, fallback to English
+        raw_text = pytesseract.image_to_string(
+            image, 
+            lang='ukr+eng',  # Ukrainian + English
+            config='--psm 6 --oem 3'  # Assume uniform block of text, use LSTM OCR engine
+        )
+    except Exception:
+        # Fallback to English only if Ukrainian fails
+        try:
+            raw_text = pytesseract.image_to_string(
+                image, 
+                lang='eng',
+                config='--psm 6 --oem 3'
+            )
+        except Exception:
+            # Final fallback without language specification
+            raw_text = pytesseract.image_to_string(image)
+    
+    # Post-process OCR results to fix common recognition errors
+    print(f"[INFO] OCR raw result length: {len(raw_text)} characters", flush=True)
+    
+    cleaned_text = _fix_ocr_errors(raw_text)
+    print(f"[INFO] OCR cleaned result length: {len(cleaned_text)} characters", flush=True)
+    
+    return cleaned_text
+
+
+def _fix_ocr_errors(text: str) -> str:
+    """Fix common OCR recognition errors for Ukrainian and English text."""
+    if not text:
+        return text
+    
+    # Basic cleanup first
+    import re
+    corrected_text = text
+    
+    # Fix common spacing issues
+    corrected_text = re.sub(r'\s+', ' ', corrected_text)  # Multiple spaces to single
+    corrected_text = re.sub(r'([.!?])\s*([A-ZА-Я])', r'\1 \2', corrected_text)  # Space after punctuation
+    corrected_text = re.sub(r'([a-zа-я])([A-ZА-Я])', r'\1 \2', corrected_text)  # Space between words
+    
+    # Apply only the most critical corrections to avoid issues
+    critical_corrections = {
+        '3Gepirac': 'Результати',
+        'PesyIbTaTM': 'Результати',
+        'PeslOMYBAHA': 'Резюмування',
+        'Kem': 'Key',
+        'Cucrema': 'Система',
+        'ClicTema': 'Система',
+        'cucTema': 'система',
+    }
+    
+    for error, correction in critical_corrections.items():
+        corrected_text = corrected_text.replace(error, correction)
+    
+    return corrected_text.strip()
 
 
 def load_any(path: Path, force_ocr: bool = False, parse_docx_tables: bool = False, ocr_docx_images: bool = False, parse_pdf_tables: bool = False, ocr_pdf_images: bool = False) -> Tuple[str, str]:
@@ -190,7 +275,12 @@ def load_any(path: Path, force_ocr: bool = False, parse_docx_tables: bool = Fals
 
     Автоматично обробляє PDF/DOCX: витягує таблиці та робить OCR зображень за замовчуванням.
     Для зображень (.jpg/.jpeg/.png) OCR виконується автоматично (force_ocr ігнорується).
-    Підтримка: .txt, .pdf, .docx, .csv, .xlsx, .jpg/.jpeg/.png.
+    
+    Підтримувані формати:
+    - Текстові: .txt
+    - Документи: .pdf, .docx (з таблицями та зображеннями)
+    - Таблиці: .csv, .xlsx, .xlsm, .xls
+    - Зображення: .jpg, .jpeg, .png (з OCR)
     """
     suffix = path.suffix.lower()
     tables_note = ""
@@ -224,18 +314,21 @@ def load_any(path: Path, force_ocr: bool = False, parse_docx_tables: bool = Fals
             md = _extract_docx_tables_markdown(path)
             if md:
                 extras.append(md)
-        except Exception:
-            pass
+                print(f"[INFO] Extracted {len(md.split(chr(10)))} lines of table data from DOCX", flush=True)
+        except Exception as e:
+            print(f"[WARNING] Failed to extract tables from DOCX: {e}", flush=True)
         try:
             ocr_text = _extract_docx_images_ocr(path)
             if ocr_text:
                 extras.append(ocr_text)
-        except Exception:
-            pass
+                print(f"[INFO] Extracted {len(ocr_text)} characters from DOCX images", flush=True)
+        except Exception as e:
+            print(f"[WARNING] Failed to OCR images from DOCX: {e}", flush=True)
         text = "\n\n".join([t for t in [text_main] + extras if t])
-    elif suffix in {".csv", ".xlsx"}:
+    elif suffix in {".csv", ".xlsx", ".xlsm", ".xls"}:
         text = _load_table(path)
         tables_note = "Tabular data preview included in context."
+        print(f"[INFO] Loaded table from {suffix} file: {len(text)} characters", flush=True)
     elif suffix in {".jpg", ".jpeg", ".png"}:
         # OCR завжди для зображень
         text = _load_image_ocr(path)

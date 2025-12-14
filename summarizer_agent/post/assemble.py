@@ -20,11 +20,11 @@ def assemble_summary(
         facts_text = "\n".join(facts) if facts else "Фактів не знайдено."
         return facts_text, facts_text
 
-    # Обробляємо резюме чанків
-    processed_summaries = _process_chunk_summaries(chunk_summaries, original_text)
+    # Обробляємо резюме чанків (тепер з індексами чанків)
+    processed_summaries_with_chunks = _process_chunk_summaries(chunk_summaries, original_text)
     
-    # Ранжуємо речення за важливістю
-    ranked_sentences = _rank_sentences(processed_summaries, original_text)
+    # Ранжуємо речення за важливістю з урахуванням позиції чанків
+    ranked_sentences = _rank_sentences(processed_summaries_with_chunks, original_text, len(chunk_summaries))
     
     # Формуємо коротке резюме
     short_summary = _create_short_summary(
@@ -34,18 +34,22 @@ def assemble_summary(
         original_text=original_text,
     )
     
-    # Формуємо розширене резюме
-    extended_summary = _create_extended_summary(processed_summaries, facts, tables_note, target_max_words)
+    # Формуємо розширене резюме (використовуємо тільки речення без індексів)
+    processed_summaries_only = [sentence for sentence, _ in processed_summaries_with_chunks]
+    extended_summary = _create_extended_summary(processed_summaries_only, facts, tables_note, target_max_words)
 
     return short_summary, extended_summary
 
 
-def _process_chunk_summaries(chunk_summaries: List[str], original_text: str) -> List[str]:
-    """Обробляє резюме чанків: видаляє дублікати та покращує якість."""
+def _process_chunk_summaries(chunk_summaries: List[str], original_text: str) -> List[Tuple[str, int]]:
+    """Обробляє резюме чанків: видаляє дублікати та покращує якість.
+    
+    Повертає список кортежів (речення, індекс_чанка) для відстеження позиції.
+    """
     processed = []
     seen_sentences: Set[str] = set()
     
-    for summary in chunk_summaries:
+    for chunk_idx, summary in enumerate(chunk_summaries):
         if not summary.strip():
             continue
             
@@ -67,22 +71,28 @@ def _process_chunk_summaries(chunk_summaries: List[str], original_text: str) -> 
                 and _has_sufficient_overlap(cleaned, original_text, min_jaccard=0.1)
             ):
                 seen_sentences.add(normalized)
-                processed.append(cleaned)
+                processed.append((cleaned, chunk_idx))  # Зберігаємо індекс чанка
     
     return processed
 
 
-def _rank_sentences(sentences: List[str], original_text: str) -> List[Tuple[str, float]]:
-    """Ранжує речення за важливістю на основі різних факторів."""
-    if not sentences:
+def _rank_sentences(sentences_with_chunks: List[Tuple[str, int]], original_text: str, total_chunks: int) -> List[Tuple[str, float]]:
+    """Ранжує речення за важливістю на основі різних факторів.
+    
+    Враховує позицію чанка для кращого покриття всього тексту.
+    """
+    if not sentences_with_chunks:
         return []
     
     # Витягуємо ключові слова з оригінального тексту
     key_words = _extract_keywords(original_text)
     
     ranked = []
-    for sentence in sentences:
-        score = _calculate_sentence_score(sentence, key_words, original_text)
+    for sentence, chunk_idx in sentences_with_chunks:
+        # Обчислюємо позицію чанка (0.0 = початок, 1.0 = кінець)
+        chunk_position = chunk_idx / max(1, total_chunks - 1) if total_chunks > 1 else 0.5
+        
+        score = _calculate_sentence_score(sentence, key_words, original_text, chunk_position)
         ranked.append((sentence, score))
     
     # Сортуємо за важливістю
@@ -90,8 +100,15 @@ def _rank_sentences(sentences: List[str], original_text: str) -> List[Tuple[str,
     return ranked
 
 
-def _calculate_sentence_score(sentence: str, key_words: Set[str], original_text: str) -> float:
-    """Обчислює важливість речення на основі різних факторів."""
+def _calculate_sentence_score(sentence: str, key_words: Set[str], original_text: str, chunk_position: float = 0.5) -> float:
+    """Обчислює важливість речення на основі різних факторів.
+    
+    Args:
+        sentence: Речення для оцінки
+        key_words: Набір ключових слів з оригінального тексту
+        original_text: Оригінальний текст
+        chunk_position: Позиція чанка (0.0 = початок, 1.0 = кінець)
+    """
     score = 0.0
     words = sentence.lower().split()
     
@@ -99,9 +116,15 @@ def _calculate_sentence_score(sentence: str, key_words: Set[str], original_text:
     key_word_count = sum(1 for word in words if word in key_words)
     score += key_word_count * 2.0
     
-    # Фактор 2: Позиція в тексті (початок важливіший)
-    position_score = 1.0 - (len(sentence) / len(original_text))
-    score += position_score * 1.5
+    # Фактор 2: Позиція чанка (легкий бонус для початку, але не занадто великий)
+    # Початок трохи важливіший, але не настільки, щоб ігнорувати середину та кінець
+    if chunk_position < 0.3:  # Перші 30% тексту
+        position_bonus = 0.5
+    elif chunk_position < 0.7:  # Середина тексту
+        position_bonus = 0.3  # Невеликий бонус для рівномірного покриття
+    else:  # Останні 30% тексту
+        position_bonus = 0.4  # Бонус для висновків
+    score += position_bonus
     
     # Фактор 3: Довжина речення (оптимальна довжина)
     word_count = len(words)
@@ -158,9 +181,38 @@ def _create_short_summary(
     - Якщо немає зрозумілого самодостатнього речення в межах ліміту — повернути перше провідне
       (lead) речення, яке вміщується, без штучних доповнень.
     - Конкатенацію застосовувати лише для більшого ліміту.
+    - Для кращого покриття вибирати речення з різних частин тексту (початок, середина, кінець).
     """
-    # Для великих бюджетів формуємо безпосередньо з оригіналу для кращої керованості довжиною
+    # Для великих бюджетів формуємо з ранжованих речень для кращого покриття
     if max_words >= 120:
+        # Використовуємо ранжовані речення з усіх чанків замість тільки оригінальних
+        collected: List[str] = []
+        total = 0
+        seen_normalized = set()
+        
+        for sentence, score in ranked_sentences:
+            sentence_clean = _cleanup_sentence(sentence)
+            if _looks_like_boilerplate(sentence_clean):
+                continue
+            
+            sentence_norm = _normalize_sentence(sentence_clean)
+            if sentence_norm in seen_normalized:
+                continue
+            
+            w = len(sentence_clean.split())
+            if w > max_words:
+                continue
+            if total + w <= max_words:
+                collected.append(sentence_clean)
+                seen_normalized.add(sentence_norm)
+                total += w
+            if total >= min_words and len(collected) >= 2:  # Мінімум 2 речення для покриття
+                break
+        
+        if collected:
+            return " ".join(collected)
+        
+        # Fallback до оригінальних речень, якщо ранжовані не підійшли
         collected: List[str] = []
         total = 0
         for s in _best_original_sentences(original_text):
@@ -242,16 +294,26 @@ def _create_short_summary(
         return " ".join(words[:max_words]).rstrip() + "…"
 
     # Звичайний (не ультракороткий) режим: можна обережно конкатенувати
+    # Додаємо логіку для рівномірного покриття всього тексту
     selected_sentences: List[str] = []
     current_words = 0
-
+    seen_normalized: Set[str] = set()  # Відстежуємо нормалізовані речення для уникнення дублікатів
+    
     for sentence, score in ranked_sentences:
         sentence = _cleanup_sentence(sentence)
         sentence_words = len(sentence.split())
         if sentence_words > max_words:
             continue
+        
+        # Перевіряємо на дублікати
+        sentence_normalized = _normalize_sentence(sentence)
+        if sentence_normalized in seen_normalized:
+            continue
+        
+        # Перевіряємо, чи можемо додати речення
         if current_words + sentence_words <= max_words:
             selected_sentences.append(sentence)
+            seen_normalized.add(sentence_normalized)
             current_words += sentence_words
             # Продовжуємо поки не вичерпано бюджет або немає речень
         else:

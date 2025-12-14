@@ -23,13 +23,13 @@ import time
 import threading
 import uuid
 
-# Global progress tracking
+# Глобальне відстеження прогресу
 progress_tracker = {}
 progress_lock = threading.Lock()
 import os
 
 def update_progress(task_id: str, progress: int, message: str, eta_seconds: int = None):
-    """Update progress for a task"""
+    """Оновлення прогресу для завдання"""
     with progress_lock:
         progress_tracker[task_id] = {
             'progress': progress,
@@ -39,12 +39,12 @@ def update_progress(task_id: str, progress: int, message: str, eta_seconds: int 
         }
 
 def get_progress(task_id: str) -> dict:
-    """Get current progress for a task"""
+    """Отримання поточного прогресу для завдання"""
     with progress_lock:
         return progress_tracker.get(task_id, {'progress': 0, 'message': 'Starting...', 'eta_seconds': None})
 
 def clear_progress(task_id: str):
-    """Clear progress for a task"""
+    """Очищення прогресу для завдання"""
     with progress_lock:
         if task_id in progress_tracker:
             del progress_tracker[task_id]
@@ -135,22 +135,68 @@ def async_summarize(request: HttpRequest, task_id: str) -> HttpResponse:
             no_facts = form.cleaned_data.get('no_facts', False)
             
             if uploaded:
-                # Save uploaded file
-                tmp_dir = Path.cwd() / 'tmp_uploads'
-                tmp_dir.mkdir(parents=True, exist_ok=True)
-                tmp_path = tmp_dir / uploaded.name
-                with tmp_path.open('wb') as fh:
-                    for chunk in uploaded.chunks():
-                        fh.write(chunk)
-                from summarizer_agent.io.loaders import load_any
-                text, _ = load_any(tmp_path)
-                
-                # Auto-cleanup uploaded file after processing
                 try:
-                    tmp_path.unlink()
-                    print(f"[INFO] Cleaned up uploaded file: {uploaded.name}", flush=True)
+                    # Save uploaded file
+                    tmp_dir = Path.cwd() / 'tmp_uploads'
+                    tmp_dir.mkdir(parents=True, exist_ok=True)
+                    tmp_path = tmp_dir / uploaded.name
+                    print(f"[INFO] Processing uploaded file: {uploaded.name}", flush=True)
+                    with tmp_path.open('wb') as fh:
+                        for chunk in uploaded.chunks():
+                            fh.write(chunk)
+                    
+                    print(f"[INFO] File saved to: {tmp_path}", flush=True)
+                    from summarizer_agent.io.loaders import load_any
+                    print(f"[INFO] Starting load_any for: {tmp_path.suffix}", flush=True)
+                    text, _ = load_any(tmp_path)
+                    print(f"[INFO] Successfully loaded {len(text)} characters from file", flush=True)
+                    
+                    # Auto-cleanup uploaded file after processing
+                    try:
+                        tmp_path.unlink()
+                        print(f"[INFO] Cleaned up uploaded file: {uploaded.name}", flush=True)
+                    except Exception as e:
+                        print(f"[WARNING] Failed to cleanup file {uploaded.name}: {e}", flush=True)
+                        
+                except RuntimeError as e:
+                    # OCR/library errors
+                    error_msg = f"File processing failed: {str(e)}"
+                    print(f"[ERROR] RuntimeError: {error_msg}", flush=True)
+                    import traceback
+                    traceback.print_exc()
+                    
+                    # Cleanup file
+                    try:
+                        if 'tmp_path' in locals():
+                            tmp_path.unlink()
+                    except:
+                        pass
+                        
+                    # Return error immediately
+                    return HttpResponse(
+                        json.dumps({'error': error_msg}), 
+                        content_type='application/json', 
+                        status=400
+                    )
                 except Exception as e:
-                    print(f"[WARNING] Failed to cleanup file {uploaded.name}: {e}", flush=True)
+                    # Other errors
+                    error_msg = f"Unexpected error processing file: {str(e)}"
+                    print(f"[ERROR] Exception: {error_msg}", flush=True)
+                    import traceback
+                    traceback.print_exc()
+                    
+                    # Cleanup
+                    try:
+                        if 'tmp_path' in locals():
+                            tmp_path.unlink()
+                    except:
+                        pass
+                        
+                    return HttpResponse(
+                        json.dumps({'error': error_msg}), 
+                        content_type='application/json', 
+                        status=500
+                    )
             
             # Start summarization in background thread
             def summarize_thread():
@@ -575,19 +621,18 @@ def _summarize_text(raw_text: str, no_facts: bool = False, task_id: str = None) 
                 model_name = "facebook/bart-large-cnn"
                 print(f"[INFO] All models failed, using BART for Ukrainian text", flush=True)
         else:
-            # Try mT5 first for English as well
+            # For English we force BART first to reduce hallucinations; mT5 only as last fallback
             possible_models = [
-                "csebuetnlp/mT5_multilingual_XLSum",  # First try - multilingual model
-                "facebook/bart-large-cnn"  # Fallback - specialized for news summarization
+                "facebook/bart-large-cnn",          # Primary for English
+                "csebuetnlp/mT5_multilingual_XLSum"  # Fallback only if BART fails to load
             ]
             
             model_name = None
             for model in possible_models:
                 try:
-                    # Test if model can be loaded
                     from transformers import AutoTokenizer
                     print(f"[DEBUG] Testing model: {model}", flush=True)
-                    # Use slow tokenizer for mT5, fast for BART
+                    # Use fast tokenizer for BART, slow for mT5
                     use_fast = "bart" in model.lower()
                     tokenizer = AutoTokenizer.from_pretrained(model, use_fast=use_fast)
                     model_name = model
@@ -635,7 +680,7 @@ def _summarize_text(raw_text: str, no_facts: bool = False, task_id: str = None) 
         if detected_lang == "uk":
             print(f"[INFO] Using mT5 model for Ukrainian text (optimized for multilingual summarization)", flush=True)
         else:
-            print(f"[INFO] Using mT5 model for English text (multilingual model with conservative parameters)", flush=True)
+            print(f"[INFO] Using BART model for English text (forced primary for lower hallucinations)", flush=True)
         print(f"[INFO] Loading summarizer model: {model_name}...", flush=True)
         
         if task_id:
@@ -705,9 +750,12 @@ def _summarize_text(raw_text: str, no_facts: bool = False, task_id: str = None) 
         # Комбінований підхід до розрахунку довжини чанків
         text_words = len(raw_text.split())
         num_chunks = len(chunks)
-        target_total_words = 400  # Базова цільова довжина фінального резюме
         
-        # Базові значення
+        # Адаптивна цільова довжина: 15-20% від оригіналу, мінімум 100 слів
+        target_total_words = max(100, int(text_words * 0.15))
+        target_total_words = min(target_total_words, 500)  # Максимум 500 слів
+        
+        # Базові значення для чанків
         base_min = 60
         base_max = 150
         
@@ -721,6 +769,9 @@ def _summarize_text(raw_text: str, no_facts: bool = False, task_id: str = None) 
         
         # Адаптуємо цільову довжину фінального резюме під реальні можливості чанків
         realistic_target_words = min(target_total_words, num_chunks * chunk_max_words)
+        # Гарантуємо мінімум 100 слів для тексту 650+ слів
+        if text_words >= 500:
+            realistic_target_words = max(realistic_target_words, 100)
         
         print(f"[INFO] Adaptive chunk sizing: {text_words} words -> {num_chunks} chunks", flush=True)
         print(f"[INFO] Adaptation factors: text={text_factor:.2f}, chunks={chunk_factor:.2f}", flush=True)
@@ -744,14 +795,23 @@ def _summarize_text(raw_text: str, no_facts: bool = False, task_id: str = None) 
         tables_note = ""
         
         print("[INFO] Assembling final summary...", flush=True)
+        # Гарантуємо мінімальну довжину резюме
+        min_words = max(80, int(text_words * 0.10))  # Мінімум 10% від оригіналу, але не менше 80 слів
+        min_words = min(min_words, realistic_target_words)  # Але не більше максимуму
+        
         short_summary, extended_summary = assemble_summary(
             chunk_summaries, 
             facts, 
             tables_note, 
-            target_min_words=100, 
+            target_min_words=min_words, 
             target_max_words=realistic_target_words,
             original_text=raw_text
         )
+        
+        # Додаткова перевірка: якщо резюме занадто коротке, попереджаємо
+        summary_words = len(short_summary.split())
+        if summary_words < min_words * 0.7:
+            print(f"[WARNING] Summary too short: {summary_words} words (expected at least {min_words})", flush=True)
         
         print("[INFO] Summarization completed successfully!", flush=True)
         
